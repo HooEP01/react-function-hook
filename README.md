@@ -10,6 +10,8 @@
   1. isError
   2. Error message
 
+### installation
+> version 0.1.0
 ```
 npm i react-function-hook
 ```
