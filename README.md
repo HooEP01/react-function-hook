@@ -9,3 +9,7 @@
 - Error
   1. isError
   2. Error message
+
+```
+npm i react-function-hook
+```
