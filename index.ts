@@ -36,7 +36,6 @@ export const useFunction = (func: Func, ...args: any[]) => {
             try {
                 // TODO: Use decorator pattern
                 const result = await func(...args);
-                setLoad(false);
                 return result;
             } catch (error: unknown) {
                 let errorMessage = extractErrorMessage(error);
