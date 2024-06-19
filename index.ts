@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-type Func = {
-    (options?: { signal: AbortSignal }, ...args: any[]): Promise<any>;
+type Func<T> = {
+    (signal: AbortSignal, ...args: any[]): Promise<T>;
 }
 
 type ErrorItem = {
@@ -16,53 +16,88 @@ type Retry = {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const useFunction = (func: Func, ...args: any[]) => {
-    const [isLoad, setIsLoad] = useState(false);
+export const useFunction = <T>(func: Func<T>, singleton = false) => {
+    const [data, setData] = useState<T | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
     const [isError, setIsError] = useState<ErrorItem>({ isError: false });
-    const [retry, setRetry] = useState<Retry>({ times: 3, duration: 1000});
+    const [retry, setRetry] = useState<Retry>({ times: 3, duration: 1000 });
 
-    const isLoadRef = useRef(isLoad);
-    const isErrorRef = useRef(isError);
+    const isLoadingRef = useRef(false);
+    const isErrorRef = useRef<ErrorItem>({ isError: false });
 
-    useEffect(() => {
-        isLoadRef.current = isLoad;
-        isErrorRef.current = isError;
-    }, [isLoad, isError]);
+    // abort controller reference
+    const abortControllerRef = useRef<AbortController | null>(null);
 
-    const runFunc = async () => {
+    const runFunc = async (customArgs: any[] = [], currentAttempt = 0, maxAttempts = retry.times): Promise<any> => {
+        // is singleton
+        if (isLoading && singleton) return;
         setLoad(true);
 
-        for (let attempt = 0; attempt <= retry.times; attempt++) {
-            try {
-                // TODO: Use decorator pattern
-                const result = await func(...args);
-                return result;
-            } catch (error: unknown) {
-                let errorMessage = extractErrorMessage(error);
-
-                setIsError({
-                    isError: true,
-                    message: errorMessage
-                });
-
-                if (attempt < retry.times) {
-                    await delay(retry.duration);
-                }
-            } finally {
-                setLoad(false);
-            }
+        if (abortControllerRef.current) {
+            // abort the previous request
+            abortControllerRef.current.abort();
         }
 
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
+
+        if (currentAttempt >= maxAttempts) {
+            // reset error state
+            setIsError({
+                isError: true,
+                message: "Max attempts reached"
+            });
+
+            // reset loading state
+            setLoad(false);
+
+            return null;
+        }
+
+        try {
+            // call the function
+            const result = await func(signal, ...customArgs);
+
+            // store response data
+            setData(result);
+
+            // reset error state
+            setIsError({ isError: false });
+
+            // reset loading state
+            setLoad(false);
+
+            // return response data
+            return result;
+        } catch (error: unknown) {
+            let errorMessage = extractErrorMessage(error);
+
+            // error message
+            setIsError({
+                isError: true,
+                message: errorMessage
+            });
+
+            // delay before retrying
+            await delay(retry.duration);
+
+            // retry the function
+            return runFunc(customArgs, currentAttempt + 1, maxAttempts);
+        }
     }
 
+    // loading function
     const setLoad = (load?: boolean) => {
         if (load !== undefined) {
-            setIsLoad(load);
+            setIsLoading(load);
+            isLoadingRef.current = load;
             return;
         }
-        setIsLoad((prev) => !prev);
+        setIsLoading((prev) => !prev);
+        isLoadingRef.current = !isLoadingRef.current;
     }
 
+    // error message function
     function extractErrorMessage(error: unknown): string {
         if (typeof error === "string") {
             return error.toUpperCase();
@@ -72,16 +107,24 @@ export const useFunction = (func: Func, ...args: any[]) => {
         return "An unknown error occurred";
     }
 
+    // store the current error state
+    useEffect(() => {
+        isErrorRef.current = isError;
+    }, [isError])
+
+    useEffect(() => {
+        return () => {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
+    }, []);
+
     return {
-        retry,
         setRetry,
-        isLoad,
-        isLoadRef,
-        setLoad,
-        isError,
-        isErrorRef,
-        runFunc
+        isLoading: isLoadingRef.current,
+        isError: isErrorRef.current,
+        runFunc,
+        data
     };
 }
-
-
